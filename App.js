@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   StyleSheet,
   Text,
@@ -12,53 +12,142 @@ import {
 } from 'react-native';
 
 export default function App() {
-  const [tasks, setTasks] = useState([
-    { id: '1', title: 'Подготовка к ЕГЭ: Профильная математика', deadline: 'Осталось: 4 ч. 20 мин.', priority: 'high', completed: false },
-    { id: '2', title: 'Загрузить расписание', deadline: 'Завтра, 09:00', priority: 'medium', completed: false },
-    { id: '3', title: 'Встреча рабочей группы', deadline: '15 сентября', priority: 'low', completed: false },
-  ]);
+  const [tasks, setTasks] = useState([]);
+  const [now, setNow] = useState(new Date());
 
   // Состояния для модального окна
   const [modalVisible, setModalVisible] = useState(false);
   const [editingTaskId, setEditingTaskId] = useState(null);
   const [formTitle, setFormTitle] = useState('');
-  const [formDeadline, setFormDeadline] = useState('');
+  const [formDate, setFormDate] = useState('');
+  const [formTime, setFormTime] = useState('09:00');
   const [formPriority, setFormPriority] = useState('medium');
 
-  // Открытие окна для новой задачи
+  // 1. Загрузка задач из localStorage при первом старте
+  useEffect(() => {
+    try {
+      const savedTasks = localStorage.getItem('pink_calendar_tasks');
+      if (savedTasks) {
+        setTasks(JSON.parse(savedTasks));
+      }
+    } catch (e) {
+      console.log('Ошибка при загрузке задач из localStorage', e);
+    }
+  }, []);
+
+  // 2. Автоматическое сохранение задач при любом их изменении
+  useEffect(() => {
+    try {
+      localStorage.setItem('pink_calendar_tasks', JSON.stringify(tasks));
+    } catch (e) {
+      console.log('Ошибка при сохранении задач', e);
+    }
+  }, [tasks]);
+
+  // 3. Обновление текущего времени каждую секунду (для работы отсчёта)
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setNow(new Date());
+    }, 1000);
+    return () => clearInterval(timer);
+  }, []);
+
+  // Функция расчета оставшегося времени
+  const getRemainingTime = (targetIsoDate) => {
+    if (!targetIsoDate) return 'Без срока';
+    const target = new Date(targetIsoDate);
+    const diff = target - now;
+
+    if (isNaN(target.getTime())) return 'Неверная дата';
+    if (diff <= 0) return '⌛ Время вышло!';
+
+    const days = Math.floor(diff / (1000 * 60 * 60 * 24));
+    const hours = Math.floor((diff / (1000 * 60 * 60)) % 24);
+    const minutes = Math.floor((diff / 1000 / 60) % 60);
+    const seconds = Math.floor((diff / 1000) % 60);
+
+    let parts = [];
+    if (days > 0) parts.push(`${days} дн.`);
+    if (hours > 0 || days > 0) parts.push(`${hours} ч.`);
+    parts.push(`${minutes} мин.`);
+    parts.push(`${seconds} сек.`);
+
+    return `Осталось: ${parts.join(' ')}`;
+  };
+
+  // Красивое отображение даты и времени
+  const formatDateTime = (isoDateStr) => {
+    if (!isoDateStr) return '';
+    const d = new Date(isoDateStr);
+    if (isNaN(d.getTime())) return '';
+    const day = String(d.getDate()).padStart(2, '0');
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const hours = String(d.getHours()).padStart(2, '0');
+    const minutes = String(d.getMinutes()).padStart(2, '0');
+    return `${day}.${month} в ${hours}:${minutes}`;
+  };
+
+  // Открытие окна создания
   const openAddModal = () => {
     setEditingTaskId(null);
     setFormTitle('');
-    setFormDeadline('');
+    const tomorrow = new Date();
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    const yyyy = tomorrow.getFullYear();
+    const mm = String(tomorrow.getMonth() + 1).padStart(2, '0');
+    const dd = String(tomorrow.getDate()).padStart(2, '0');
+    
+    setFormDate(`${yyyy}-${mm}-${dd}`);
+    setFormTime('09:00');
     setFormPriority('medium');
     setModalVisible(true);
   };
 
-  // Открытие окна для редактирования
+  // Открытие окна редактирования
   const openEditModal = (task) => {
     setEditingTaskId(task.id);
     setFormTitle(task.title);
-    setFormDeadline(task.deadline);
+    if (task.deadlineIso) {
+      const d = new Date(task.deadlineIso);
+      const yyyy = d.getFullYear();
+      const mm = String(d.getMonth() + 1).padStart(2, '0');
+      const dd = String(d.getDate()).padStart(2, '0');
+      const hh = String(d.getHours()).padStart(2, '0');
+      const min = String(d.getMinutes()).padStart(2, '0');
+      setFormDate(`${yyyy}-${mm}-${dd}`);
+      setFormTime(`${hh}:${min}`);
+    } else {
+      setFormDate('');
+      setFormTime('09:00');
+    }
     setFormPriority(task.priority);
     setModalVisible(true);
   };
 
-  // Сохранение (создание или обновление)
+  // Сохранение задачи
   const handleSaveTask = () => {
     if (!formTitle.trim()) return;
+
+    let deadlineIso = null;
+    if (formDate) {
+      const timeParts = formTime.split(':');
+      const hh = timeParts[0] || '00';
+      const mm = timeParts[1] || '00';
+      deadlineIso = new Date(`${formDate}T${hh.padStart(2, '0')}:${mm.padStart(2, '0')}:00`).toISOString();
+    }
 
     if (editingTaskId) {
       setTasks(tasks.map(t => t.id === editingTaskId ? {
         ...t,
         title: formTitle,
-        deadline: formDeadline || 'Без дедлайна',
+        deadlineIso: deadlineIso,
         priority: formPriority,
       } : t));
     } else {
       const newTask = {
         id: Date.now().toString(),
         title: formTitle,
-        deadline: formDeadline || 'Без дедлайна',
+        deadlineIso: deadlineIso,
         priority: formPriority,
         completed: false,
       };
@@ -67,26 +156,25 @@ export default function App() {
     setModalVisible(false);
   };
 
-  // Удаление задачи
   const handleDeleteTask = (id) => {
     setTasks(tasks.filter(t => t.id !== id));
     setModalVisible(false);
   };
 
-  // Переключение выполнено / не выполнено
   const toggleComplete = (id) => {
     setTasks(tasks.map(t => t.id === id ? { ...t, completed: !t.completed } : t));
   };
 
   const getPriorityColor = (priority) => {
     switch (priority) {
-      case 'high': return '#FF758F';   // Ярко-розовый
-      case 'medium': return '#FFB3C1'; // Пудровый
-      default: return '#E2ECE9';       // Мятный
+      case 'high': return '#FF758F';
+      case 'medium': return '#FFB3C1';
+      default: return '#E2ECE9';
     }
   };
 
-  const urgentTask = tasks.find(t => !t.completed && t.priority === 'high') || tasks.find(t => !t.completed);
+  const urgentTask = tasks.find(t => !t.completed && t.priority === 'high' && t.deadlineIso) 
+    || tasks.find(t => !t.completed && t.deadlineIso);
 
   return (
     <SafeAreaView style={styles.container}>
@@ -95,52 +183,64 @@ export default function App() {
         
         <Text style={styles.headerTitle}>Мой Календарь</Text>
 
-        {/* Виджет срочного дедлайна */}
+        {/* Срочный дедлайн */}
         {urgentTask && (
           <TouchableOpacity 
             style={styles.widgetCard}
             onPress={() => openEditModal(urgentTask)}
             activeOpacity={0.8}
           >
-            <Text style={styles.widgetBadge}>⚡ Срочный дедлайн</Text>
+            <Text style={styles.widgetBadge}>⚡ Ближайший дедлайн ({formatDateTime(urgentTask.deadlineIso)})</Text>
             <Text style={styles.widgetTitle}>{urgentTask.title}</Text>
-            <Text style={styles.widgetTimer}>{urgentTask.deadline}</Text>
+            <Text style={styles.widgetTimer}>{getRemainingTime(urgentTask.deadlineIso)}</Text>
           </TouchableOpacity>
         )}
 
         {/* Список задач */}
         <View style={styles.sectionHeader}>
           <Text style={styles.sectionTitle}>Все задачи</Text>
-          <Text style={styles.subText}>Нажми на задачу для изменения</Text>
+          <Text style={styles.subText}>Нажми для изменения</Text>
         </View>
 
         <ScrollView style={styles.taskList} showsVerticalScrollIndicator={false}>
-          {tasks.map(task => (
-            <TouchableOpacity 
-              key={task.id} 
-              style={[styles.taskCard, task.completed && styles.taskCardCompleted]}
-              onPress={() => openEditModal(task)}
-              activeOpacity={0.7}
-            >
+          {tasks.length === 0 ? (
+            <View style={styles.emptyState}>
+              <Text style={styles.emptyText}>У вас пока нет задач ✨</Text>
+              <Text style={styles.emptySubText}>Нажмите кнопку ниже, чтобы создать первую!</Text>
+            </View>
+          ) : (
+            tasks.map(task => (
               <TouchableOpacity 
-                style={[styles.checkbox, task.completed && styles.checkboxActive]}
-                onPress={() => toggleComplete(task.id)}
+                key={task.id} 
+                style={[styles.taskCard, task.completed && styles.taskCardCompleted]}
+                onPress={() => openEditModal(task)}
+                activeOpacity={0.7}
               >
-                {task.completed && <Text style={styles.checkmark}>✓</Text>}
+                <TouchableOpacity 
+                  style={[styles.checkbox, task.completed && styles.checkboxActive]}
+                  onPress={() => toggleComplete(task.id)}
+                >
+                  {task.completed && <Text style={styles.checkmark}>✓</Text>}
+                </TouchableOpacity>
+
+                <View style={[styles.priorityTag, { backgroundColor: getPriorityColor(task.priority) }]} />
+                
+                <View style={styles.taskContent}>
+                  <Text style={[styles.taskTitle, task.completed && styles.taskTitleCompleted]}>
+                    {task.title}
+                  </Text>
+                  <Text style={styles.taskFormattedDate}>
+                    {task.deadlineIso ? formatDateTime(task.deadlineIso) : 'Без срока'}
+                  </Text>
+                  <Text style={styles.taskTimer}>
+                    {getRemainingTime(task.deadlineIso)}
+                  </Text>
+                </View>
+
+                <Text style={styles.editHint}>✎</Text>
               </TouchableOpacity>
-
-              <View style={[styles.priorityTag, { backgroundColor: getPriorityColor(task.priority) }]} />
-              
-              <View style={styles.taskContent}>
-                <Text style={[styles.taskTitle, task.completed && styles.taskTitleCompleted]}>
-                  {task.title}
-                </Text>
-                <Text style={styles.taskDeadline}>{task.deadline}</Text>
-              </View>
-
-              <Text style={styles.editHint}>✎</Text>
-            </TouchableOpacity>
-          ))}
+            ))
+          )}
         </ScrollView>
 
         <TouchableOpacity style={styles.addButton} onPress={openAddModal}>
@@ -149,7 +249,7 @@ export default function App() {
 
       </View>
 
-      {/* Всплывающее окно создания / редактирования */}
+      {/* Модальное окно */}
       <Modal
         animationType="fade"
         transparent={true}
@@ -165,20 +265,34 @@ export default function App() {
             <Text style={styles.inputLabel}>Название задачи</Text>
             <TextInput
               style={styles.modalInput}
-              placeholder="Например: Подготовка к экзамену"
+              placeholder="Например: Сделать домашнее задание"
               placeholderTextColor="#B0A8B9"
               value={formTitle}
               onChangeText={setFormTitle}
             />
 
-            <Text style={styles.inputLabel}>Срок / Дедлайн</Text>
-            <TextInput
-              style={styles.modalInput}
-              placeholder="Например: Завтра в 15:00"
-              placeholderTextColor="#B0A8B9"
-              value={formDeadline}
-              onChangeText={setFormDeadline}
-            />
+            <View style={styles.rowInputs}>
+              <View style={{ flex: 1, marginRight: 6 }}>
+                <Text style={styles.inputLabel}>Дата (ГГГГ-ММ-ДД)</Text>
+                <TextInput
+                  style={styles.modalInput}
+                  placeholder="2026-09-15"
+                  placeholderTextColor="#B0A8B9"
+                  value={formDate}
+                  onChangeText={setFormDate}
+                />
+              </View>
+              <View style={{ flex: 1, marginLeft: 6 }}>
+                <Text style={styles.inputLabel}>Время (ЧЧ:ММ)</Text>
+                <TextInput
+                  style={styles.modalInput}
+                  placeholder="09:00"
+                  placeholderTextColor="#B0A8B9"
+                  value={formTime}
+                  onChangeText={setFormTime}
+                />
+              </View>
+            </View>
 
             <Text style={styles.inputLabel}>Приоритет</Text>
             <View style={styles.prioritySelector}>
@@ -269,10 +383,10 @@ const styles = StyleSheet.create({
     color: '#590D22',
   },
   widgetTimer: {
-    fontSize: 14,
+    fontSize: 13,
     color: '#800F2F',
-    marginTop: 4,
-    fontWeight: '500',
+    marginTop: 6,
+    fontWeight: '600',
   },
   sectionHeader: {
     flexDirection: 'row',
@@ -292,6 +406,22 @@ const styles = StyleSheet.create({
   taskList: {
     flex: 1,
   },
+  emptyState: {
+    padding: 30,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  emptyText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#8A7A7A',
+    marginBottom: 6,
+  },
+  emptySubText: {
+    fontSize: 12,
+    color: '#B0A8B9',
+    textAlign: 'center',
+  },
   taskCard: {
     backgroundColor: '#FFFFFF',
     borderRadius: 14,
@@ -301,7 +431,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   taskCardCompleted: {
-    opacity: 0.6,
+    opacity: 0.5,
   },
   checkbox: {
     width: 22,
@@ -324,7 +454,7 @@ const styles = StyleSheet.create({
   },
   priorityTag: {
     width: 6,
-    height: 36,
+    height: 42,
     borderRadius: 3,
     marginRight: 12,
   },
@@ -340,10 +470,17 @@ const styles = StyleSheet.create({
     textDecorationLine: 'line-through',
     color: '#9E9E9E',
   },
-  taskDeadline: {
-    fontSize: 12,
-    color: '#A09090',
+  taskFormattedDate: {
+    fontSize: 11,
+    color: '#8A7A7A',
     marginTop: 2,
+    fontWeight: '500',
+  },
+  taskTimer: {
+    fontSize: 11,
+    color: '#FF758F',
+    marginTop: 2,
+    fontWeight: '700',
   },
   editHint: {
     fontSize: 16,
@@ -362,7 +499,6 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: '700',
   },
-  /* Стили всплывающего окна */
   modalOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0, 0, 0, 0.4)',
@@ -385,19 +521,23 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   inputLabel: {
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: '600',
     color: '#8A7A7A',
-    marginBottom: 6,
+    marginBottom: 4,
   },
   modalInput: {
     backgroundColor: '#FFF0F3',
     borderRadius: 12,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    fontSize: 14,
+    paddingHorizontal: 12,
+    paddingVertical: 9,
+    fontSize: 13,
     color: '#4A3E3D',
-    marginBottom: 14,
+    marginBottom: 12,
+  },
+  rowInputs: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
   },
   prioritySelector: {
     flexDirection: 'row',
@@ -409,7 +549,7 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     borderRadius: 10,
     alignItems: 'center',
-    marginHorizontal: 4,
+    marginHorizontal: 3,
     opacity: 0.7,
   },
   priorityBtnSelected: {
