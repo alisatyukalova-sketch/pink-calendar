@@ -12,74 +12,93 @@ import {
 } from 'react-native';
 
 export default function App() {
-  const [items, setItems] = useState([]); // Задачи и события
+  const [items, setItems] = useState([]); // Задачи, события, пары
   const [now, setNow] = useState(new Date());
+  const [deviceId, setDeviceId] = useState('');
 
   // Календарная навигация
-  const [selectedDateStr, setSelectedDateStr] = useState(''); // Формат YYYY-MM-DD
+  const [selectedDateStr, setSelectedDateStr] = useState(''); // YYYY-MM-DD
   const [currentMonthDate, setCurrentMonthDate] = useState(new Date());
 
   // Состояния для модального окна
   const [modalVisible, setModalVisible] = useState(false);
   const [editingId, setEditingId] = useState(null);
-  const [itemType, setItemType] = useState('task'); // 'task' или 'event'
+  const [itemType, setItemType] = useState('task'); // 'task', 'event', 'class'
   const [formTitle, setFormTitle] = useState('');
   
-  // Даты/время для задачи
+  // Задача
   const [formDate, setFormDate] = useState('');
   const [formTime, setFormTime] = useState('09:00');
+  const [formPriority, setFormPriority] = useState('medium');
 
-  // Даты/время для события
+  // Событие (с - по)
   const [formStartDate, setFormStartDate] = useState('');
   const [formStartTime, setFormStartTime] = useState('09:00');
   const [formEndDate, setFormEndDate] = useState('');
   const [formEndTime, setFormEndTime] = useState('18:00');
 
-  const [formPriority, setFormPriority] = useState('medium');
+  // Пара (университет)
+  const [formClassDate, setFormClassDate] = useState('');
+  const [formClassTime, setFormClassTime] = useState('09:00');
+  const [formClassSubtype, setFormClassSubtype] = useState('lecture'); // lecture, practice, seminar
 
-  // PWA & Storage init
+  // Инициализация устройства, хранилища и параметров из URL (если поделились)
   useEffect(() => {
-    // Регистрация мета-тегов для установки приложения на смартфон (PWA)
-    if (typeof document !== 'undefined') {
-      let metaMobile = document.querySelector('meta[name="apple-mobile-web-app-capable"]');
-      if (!metaMobile) {
-        metaMobile = document.createElement('meta');
-        metaMobile.name = 'apple-mobile-web-app-capable';
-        metaMobile.content = 'yes';
-        document.head.appendChild(metaMobile);
+    // 1. Управление устройством / сессией
+    let storedDeviceId = localStorage.getItem('pink_calendar_device_id');
+    if (!storedDeviceId) {
+      storedDeviceId = 'dev_' + Math.random().toString(36).substring(2, 15);
+      localStorage.setItem('pink_calendar_device_id', storedDeviceId);
+    }
+    setDeviceId(storedDeviceId);
+
+    // 2. Проверка, не открыта ли ссылка с расписанием от другого пользователя
+    const urlParams = new URLSearchParams(window.location.search);
+    const sharedData = urlParams.get('shared');
+
+    if (sharedData) {
+      try {
+        const decoded = JSON.parse(decodeURIComponent(atob(sharedData)));
+        if (Array.isArray(decoded)) {
+          setItems(decoded);
+          localStorage.setItem(`pink_calendar_items_${storedDeviceId}`, JSON.stringify(decoded));
+        }
+      } catch (e) {
+        console.log('Ошибка импорта общего расписания', e);
+      }
+    } else {
+      // Загрузка со своего устройства
+      try {
+        const saved = localStorage.getItem(`pink_calendar_items_${storedDeviceId}`);
+        if (saved) {
+          setItems(JSON.parse(saved));
+        }
+      } catch (e) {
+        console.log('Ошибка загрузки локальных данных', e);
       }
     }
 
-    try {
-      const saved = localStorage.getItem('pink_calendar_items_v2');
-      if (saved) {
-        setItems(JSON.parse(saved));
-      }
-    } catch (e) {
-      console.log('Ошибка при загрузке из storage', e);
-    }
-
-    // Текущий день по умолчанию
     const today = new Date();
     setSelectedDateStr(formatYMD(today));
   }, []);
 
-  // Сохранение в localStorage
+  // Автосохранение при любых изменениях
   useEffect(() => {
-    try {
-      localStorage.setItem('pink_calendar_items_v2', JSON.stringify(items));
-    } catch (e) {
-      console.log('Ошибка при сохранении в storage', e);
+    if (deviceId && items.length >= 0) {
+      try {
+        localStorage.setItem(`pink_calendar_items_${deviceId}`, JSON.stringify(items));
+      } catch (e) {
+        console.log('Ошибка сохранения', e);
+      }
     }
-  }, [items]);
+  }, [items, deviceId]);
 
-  // Обновление таймера каждую секунду
+  // Таймер обновления
   useEffect(() => {
     const timer = setInterval(() => setNow(new Date()), 1000);
     return () => clearInterval(timer);
   }, []);
 
-  // Вспомогательные функции даты
   function formatYMD(dateObj) {
     const yyyy = dateObj.getFullYear();
     const mm = String(dateObj.getMonth() + 1).padStart(2, '0');
@@ -87,7 +106,7 @@ export default function App() {
     return `${yyyy}-${mm}-${dd}`;
   }
 
-  // Автоматическая маска ввода даты (YYYY-MM-DD)
+  // Маски ввода
   const handleDateMask = (text, setter) => {
     const cleaned = text.replace(/\D/g, '').slice(0, 8);
     let formatted = cleaned;
@@ -99,7 +118,6 @@ export default function App() {
     setter(formatted);
   };
 
-  // Автоматическая маска ввода времени (HH:MM)
   const handleTimeMask = (text, setter) => {
     const cleaned = text.replace(/\D/g, '').slice(0, 4);
     let formatted = cleaned;
@@ -109,25 +127,39 @@ export default function App() {
     setter(formatted);
   };
 
-  // Расчет остатка времени
+  // Поделиться расписанием
+  const handleShare = () => {
+    try {
+      const jsonStr = JSON.stringify(items);
+      const encoded = btoa(encodeURIComponent(jsonStr));
+      const shareUrl = `${window.location.origin}${window.location.pathname}?shared=${encoded}`;
+      
+      if (navigator.clipboard) {
+        navigator.clipboard.writeText(shareUrl);
+        alert('Ссылка на расписание скопирована в буфер обмена! 📋 Перешли её другу.');
+      } else {
+        prompt('Скопируйте эту ссылку:', shareUrl);
+      }
+    } catch (e) {
+      alert('Не удалось создать ссылку для поделиться.');
+    }
+  };
+
+  // Статус таймера
   const getTimerStatus = (item) => {
     if (item.type === 'event') {
       if (!item.startIso || !item.endIso) return 'Сроки не заданы';
       const start = new Date(item.startIso);
       const end = new Date(item.endIso);
-
-      if (now < start) {
-        return `⏳ До начала: ${formatDiff(start - now)}`;
-      } else if (now >= start && now <= end) {
-        return `🔥 Идёт прямо сейчас! До конца: ${formatDiff(end - now)}`;
-      } else {
-        return `✅ Событие завершено`;
-      }
+      if (now < start) return `⏳ До начала: ${formatDiff(start - now)}`;
+      if (now >= start && now <= end) return `🔥 Идёт! До конца: ${formatDiff(end - now)}`;
+      return `✅ Завершено`;
     } else {
-      if (!item.deadlineIso) return 'Без срока';
-      const target = new Date(item.deadlineIso);
+      const iso = item.type === 'class' ? item.classIso : item.deadlineIso;
+      if (!iso) return 'Без срока';
+      const target = new Date(iso);
       const diff = target - now;
-      if (diff <= 0) return '⌛ Время вышло!';
+      if (diff <= 0) return item.type === 'class' ? '🎓 Пара началась/прошла' : '⌛ Время вышло!';
       return `Осталось: ${formatDiff(diff)}`;
     }
   };
@@ -157,21 +189,30 @@ export default function App() {
     return `${day}.${month} ${hours}:${minutes}`;
   };
 
-  // Генерация календаря на месяц
+  // Получить цвет полоски для элемента
+  const getItemColor = (item) => {
+    if (item.type === 'event') return '#C5832B'; // Чуть темнее для событий
+    if (item.type === 'class') {
+      if (item.subtype === 'lecture') return '#FDE047';   // Желтый
+      if (item.subtype === 'seminar') return '#FB923C';   // Оранжевый
+      if (item.subtype === 'practice') return '#38BDF8';  // Голубой
+    }
+    // Для задачи по приоритету
+    if (item.priority === 'high') return '#FF758F';
+    if (item.priority === 'medium') return '#FFB3C1';
+    return '#A3CECB';
+  };
+
+  // Сетка месяца
   const getDaysInMonthGrid = () => {
     const year = currentMonthDate.getFullYear();
     const month = currentMonthDate.getMonth();
-    
     const firstDayIndex = new Date(year, month, 1).getDay();
-    // Понедельник = 0
     const shift = (firstDayIndex === 0 ? 6 : firstDayIndex - 1);
-    
     const totalDays = new Date(year, month + 1, 0).getDate();
     const grid = [];
 
-    for (let i = 0; i < shift; i++) {
-      grid.push(null);
-    }
+    for (let i = 0; i < shift; i++) grid.push(null);
     for (let d = 1; d <= totalDays; d++) {
       const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
       grid.push({ day: d, dateStr });
@@ -179,44 +220,48 @@ export default function App() {
     return grid;
   };
 
-  // Проверка наличия элементов в дату
-  const hasItemsOnDate = (dateStr) => {
-    return items.some(item => {
+  // Получить все элементы, затрагивающие конкретный день (для полосок в календаре)
+  const getItemsForDate = (dateStr) => {
+    return items.filter(item => {
       if (item.type === 'event') {
-        const startDate = item.startIso ? item.startIso.split('T')[0] : '';
-        const endDate = item.endIso ? item.endIso.split('T')[0] : '';
-        return dateStr >= startDate && dateStr <= endDate;
+        const start = item.startIso ? item.startIso.split('T')[0] : '';
+        const end = item.endIso ? item.endIso.split('T')[0] : '';
+        return dateStr >= start && dateStr <= end;
+      } else if (item.type === 'class') {
+        return item.classIso && item.classIso.split('T')[0] === dateStr;
       } else {
         return item.deadlineIso && item.deadlineIso.split('T')[0] === dateStr;
       }
     });
   };
 
-  // Открытие модалки создания
+  // Модальные окна
   const openAddModal = () => {
     setEditingId(null);
     setItemType('task');
     setFormTitle('');
-
     const todayStr = selectedDateStr || formatYMD(new Date());
+    
     setFormDate(todayStr);
     setFormTime('09:00');
+    setFormPriority('medium');
 
     setFormStartDate(todayStr);
     setFormStartTime('09:00');
     setFormEndDate(todayStr);
     setFormEndTime('18:00');
 
-    setFormPriority('medium');
+    setFormClassDate(todayStr);
+    setFormClassTime('09:00');
+    setFormClassSubtype('lecture');
+
     setModalVisible(true);
   };
 
-  // Открытие модалки редактирования
   const openEditModal = (item) => {
     setEditingId(item.id);
     setItemType(item.type || 'task');
     setFormTitle(item.title);
-    setFormPriority(item.priority || 'medium');
 
     if (item.type === 'event') {
       if (item.startIso) {
@@ -229,7 +274,15 @@ export default function App() {
         setFormEndDate(d);
         setFormEndTime(t.slice(0, 5));
       }
+    } else if (item.type === 'class') {
+      setFormClassSubtype(item.subtype || 'lecture');
+      if (item.classIso) {
+        const [d, t] = item.classIso.split('T');
+        setFormClassDate(d);
+        setFormClassTime(t.slice(0, 5));
+      }
     } else {
+      setFormPriority(item.priority || 'medium');
       if (item.deadlineIso) {
         const [d, t] = item.deadlineIso.split('T');
         setFormDate(d);
@@ -239,26 +292,25 @@ export default function App() {
     setModalVisible(true);
   };
 
-  // Сохранение
   const handleSave = () => {
     if (!formTitle.trim()) return;
 
     let newItem = {
       id: editingId || Date.now().toString(),
       title: formTitle,
-      priority: formPriority,
       type: itemType,
       completed: false,
     };
 
     if (itemType === 'event') {
-      const startIso = `${formStartDate || selectedDateStr}T${formStartTime || '09:00'}:00`;
-      const endIso = `${formEndDate || formStartDate || selectedDateStr}T${formEndTime || '18:00'}:00`;
-      newItem.startIso = startIso;
-      newItem.endIso = endIso;
+      newItem.startIso = `${formStartDate || selectedDateStr}T${formStartTime || '09:00'}:00`;
+      newItem.endIso = `${formEndDate || formStartDate || selectedDateStr}T${formEndTime || '18:00'}:00`;
+    } else if (itemType === 'class') {
+      newItem.subtype = formClassSubtype;
+      newItem.classIso = `${formClassDate || selectedDateStr}T${formClassTime || '09:00'}:00`;
     } else {
-      const deadlineIso = formDate ? `${formDate}T${formTime || '09:00'}:00` : null;
-      newItem.deadlineIso = deadlineIso;
+      newItem.priority = formPriority;
+      newItem.deadlineIso = formDate ? `${formDate}T${formTime || '09:00'}:00` : null;
     }
 
     if (editingId) {
@@ -278,13 +330,15 @@ export default function App() {
     setItems(items.map(i => i.id === id ? { ...i, completed: !i.completed } : i));
   };
 
-  // Фильтрованные задачи для выбранного дня
+  // Фильтрация элементов для отображения в списке под календарём
   const filteredItems = items.filter(item => {
     if (!selectedDateStr) return true;
     if (item.type === 'event') {
       const s = item.startIso ? item.startIso.split('T')[0] : '';
       const e = item.endIso ? item.endIso.split('T')[0] : '';
       return selectedDateStr >= s && selectedDateStr <= e;
+    } else if (item.type === 'class') {
+      return item.classIso && item.classIso.split('T')[0] === selectedDateStr;
     } else {
       return item.deadlineIso && item.deadlineIso.split('T')[0] === selectedDateStr;
     }
@@ -303,10 +357,15 @@ export default function App() {
       <StatusBar barStyle="dark-content" backgroundColor="#FFF5F7" />
       <View style={styles.inner}>
 
-        {/* Заголовок */}
-        <Text style={styles.headerTitle}>Мой Календарь 🌸</Text>
+        {/* Верхняя панель управления */}
+        <View style={styles.topBar}>
+          <Text style={styles.headerTitle}>Мой Календарь 🌸</Text>
+          <TouchableOpacity style={styles.shareButton} onPress={handleShare}>
+            <Text style={styles.shareButtonText}>🔗 Поделиться</Text>
+          </TouchableOpacity>
+        </View>
 
-        {/* Виджет календаря (Месяц + Дни недели) */}
+        {/* Календарь с полосками задач */}
         <View style={styles.calendarContainer}>
           <View style={styles.monthHeader}>
             <TouchableOpacity onPress={() => changeMonth(-1)}>
@@ -320,20 +379,18 @@ export default function App() {
             </TouchableOpacity>
           </View>
 
-          {/* Дни недели */}
           <View style={styles.weekHeader}>
             {['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'].map((day, idx) => (
               <Text key={idx} style={styles.weekDayText}>{day}</Text>
             ))}
           </View>
 
-          {/* Сетка дней */}
           <View style={styles.daysGrid}>
             {getDaysInMonthGrid().map((cell, index) => {
               if (!cell) return <View key={index} style={styles.dayCellEmpty} />;
 
               const isSelected = selectedDateStr === cell.dateStr;
-              const hasDot = hasItemsOnDate(cell.dateStr);
+              const dayItems = getItemsForDate(cell.dateStr);
 
               return (
                 <TouchableOpacity
@@ -344,29 +401,51 @@ export default function App() {
                   <Text style={[styles.dayText, isSelected && styles.dayTextSelected]}>
                     {cell.day}
                   </Text>
-                  {hasDot && <View style={[styles.dot, isSelected && styles.dotSelected]} />}
+                  
+                  {/* Полоски индикаторов (сколько задач — столько полосок, события толще) */}
+                  <View style={styles.stripesContainer}>
+                    {dayItems.slice(0, 3).map((item, sIndex) => {
+                      const isEvt = item.type === 'event';
+                      return (
+                        <View 
+                          key={sIndex} 
+                          style={[
+                            styles.stripe, 
+                            { 
+                              backgroundColor: getItemColor(item),
+                              height: isEvt ? 5 : 3, // События толще
+                              borderRadius: isEvt ? 2.5 : 1.5,
+                            }
+                          ]} 
+                        />
+                      );
+                    })}
+                    {dayItems.length > 3 && (
+                      <Text style={styles.moreStripesText}>+</Text>
+                    )}
+                  </View>
                 </TouchableOpacity>
               );
             })}
           </View>
         </View>
 
-        {/* Панель списка задач */}
+        {/* Список под календарём */}
         <View style={styles.sectionHeader}>
           <Text style={styles.sectionTitle}>
-            {selectedDateStr ? `Задачи на ${selectedDateStr}` : 'Все задачи'}
+            {selectedDateStr ? `План на ${selectedDateStr}` : 'Все записи'}
           </Text>
           {selectedDateStr !== '' && (
             <TouchableOpacity onPress={() => setSelectedDateStr('')}>
-              <Text style={styles.resetFilterText}>Показать все</Text>
+              <Text style={styles.resetFilterText}>Сбросить фильтр</Text>
             </TouchableOpacity>
           )}
         </View>
 
         <ScrollView style={styles.taskList} showsVerticalScrollIndicator={false}>
           {filteredItems.length === 0 ? (
-            <View style={styles.emptyState}>
-              <Text style={styles.emptyText}>Нет событий или задач 🎈</Text>
+                <View style={styles.emptyState}>
+              <Text style={styles.emptyText}>Ничего не запланировано ✨</Text>
               <Text style={styles.emptySubText}>Нажми кнопку ниже для добавления!</Text>
             </View>
           ) : (
@@ -384,23 +463,31 @@ export default function App() {
                   {item.completed && <Text style={styles.checkmark}>✓</Text>}
                 </TouchableOpacity>
 
-                <View style={[
-                  styles.priorityTag, 
-                  { backgroundColor: item.type === 'event' ? '#B5E2FA' : '#FF758F' }
-                ]} />
+                <View style={[styles.priorityTag, { backgroundColor: getItemColor(item) }]} />
 
                 <View style={styles.taskContent}>
                   <View style={styles.titleRow}>
                     <Text style={[styles.taskTitle, item.completed && styles.taskTitleCompleted]}>
                       {item.title}
                     </Text>
-                    {item.type === 'event' && <Text style={styles.eventBadge}>Событие</Text>}
+                    {item.type === 'event' && <Text style={[styles.badge, { backgroundColor: '#FEF3C7', color: '#B45309' }]}>Событие</Text>}
+                    {item.type === 'class' && (
+                      <Text style={[
+                        styles.badge, 
+                        { 
+                          backgroundColor: item.subtype === 'lecture' ? '#FEF9C3' : item.subtype === 'seminar' ? '#FFEDD5' : '#E0F2FE',
+                          color: item.subtype === 'lecture' ? '#854D0E' : item.subtype === 'seminar' ? '#C2410C' : '#0369A1'
+                        }
+                      ]}>
+                        {item.subtype === 'lecture' ? 'Лекция' : item.subtype === 'seminar' ? 'Семинар' : 'Практика'}
+                      </Text>
+                    )}
                   </View>
 
                   <Text style={styles.taskFormattedDate}>
                     {item.type === 'event' 
                       ? `${formatDisplayDateTime(item.startIso)} — ${formatDisplayDateTime(item.endIso)}`
-                      : (item.deadlineIso ? formatDisplayDateTime(item.deadlineIso) : 'Без срока')
+                      : (item.type === 'class' ? formatDisplayDateTime(item.classIso) : (item.deadlineIso ? formatDisplayDateTime(item.deadlineIso) : 'Без срока'))
                     }
                   </Text>
 
@@ -416,7 +503,7 @@ export default function App() {
         </ScrollView>
 
         <TouchableOpacity style={styles.addButton} onPress={openAddModal}>
-          <Text style={styles.addButtonText}>+ Добавить задачу или событие</Text>
+          <Text style={styles.addButtonText}>+ Добавить запись</Text>
         </TouchableOpacity>
 
       </View>
@@ -431,71 +518,99 @@ export default function App() {
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
             <Text style={styles.modalTitle}>
-              {editingId ? 'Редактировать' : 'Новое запись'}
+              {editingId ? 'Редактировать запись' : 'Новая запись'}
             </Text>
 
-            {/* Выбор типа: Задача или Событие */}
+            {/* Выбор типа: Задача / Событие / Пара */}
             <View style={styles.typeSelector}>
-              <TouchableOpacity 
-                style={[styles.typeBtn, itemType === 'task' && styles.typeBtnActive]}
-                onPress={() => setItemType('task')}
-              >
-                <Text style={[styles.typeBtnText, itemType === 'task' && styles.typeBtnTextActive]}>Задача</Text>
-              </TouchableOpacity>
-              <TouchableOpacity 
-                style={[styles.typeBtn, itemType === 'event' && styles.typeBtnActive]}
-                onPress={() => setItemType('event')}
-              >
-                <Text style={[styles.typeBtnText, itemType === 'event' && styles.typeBtnTextActive]}>Событие</Text>
-              </TouchableOpacity>
+              {[
+                { id: 'task', label: 'Задача' },
+                { id: 'event', label: 'Событие' },
+                { id: 'class', label: 'Пара' },
+              ].map(t => (
+                <TouchableOpacity 
+                  key={t.id}
+                  style={[styles.typeBtn, itemType === t.id && styles.typeBtnActive]}
+                  onPress={() => setItemType(t.id)}
+                >
+                  <Text style={[styles.typeBtnText, itemType === t.id && styles.typeBtnTextActive]}>
+                    {t.label}
+                  </Text>
+                </TouchableOpacity>
+              ))}
             </View>
 
             <Text style={styles.inputLabel}>Название</Text>
             <TextInput
               style={styles.modalInput}
-              placeholder="Введите название..."
+              placeholder="Например: Высшая математика"
               placeholderTextColor="#B0A8B9"
               value={formTitle}
               onChangeText={setFormTitle}
             />
 
-            {itemType === 'task' ? (
-              /* Поля для ЗАДАЧИ */
-              <View style={styles.rowInputs}>
-                <View style={{ flex: 1, marginRight: 6 }}>
-                  <Text style={styles.inputLabel}>Дата (ГГГГ-ММ-ДД)</Text>
-                  <TextInput
-                    style={styles.modalInput}
-                    placeholder="2026-09-15"
-                    placeholderTextColor="#B0A8B9"
-                    keyboardType="numeric"
-                    maxLength={10}
-                    value={formDate}
-                    onChangeText={(txt) => handleDateMask(txt, setFormDate)}
-                  />
+            {/* НАСТРОЙКИ ДЛЯ ЗАДАЧИ */}
+            {itemType === 'task' && (
+              <>
+                <View style={styles.rowInputs}>
+                  <View style={{ flex: 1, marginRight: 6 }}>
+                    <Text style={styles.inputLabel}>Дата (ГГГГ-ММ-ДД)</Text>
+                    <TextInput
+                      style={styles.modalInput}
+                      placeholder="2026-09-15"
+                      placeholderTextColor="#B0A8B9"
+                      keyboardType="numeric"
+                      maxLength={10}
+                      value={formDate}
+                      onChangeText={(txt) => handleDateMask(txt, setFormDate)}
+                    />
+                  </View>
+                  <View style={{ flex: 1, marginLeft: 6 }}>
+                    <Text style={styles.inputLabel}>Время (ЧЧ:ММ)</Text>
+                    <TextInput
+                      style={styles.modalInput}
+                      placeholder="09:00"
+                      placeholderTextColor="#B0A8B9"
+                      keyboardType="numeric"
+                      maxLength={5}
+                      value={formTime}
+                      onChangeText={(txt) => handleTimeMask(txt, setFormTime)}
+                    />
+                  </View>
                 </View>
-                <View style={{ flex: 1, marginLeft: 6 }}>
-                  <Text style={styles.inputLabel}>Время (ЧЧ:ММ)</Text>
-                  <TextInput
-                    style={styles.modalInput}
-                    placeholder="09:00"
-                    placeholderTextColor="#B0A8B9"
-                    keyboardType="numeric"
-                    maxLength={5}
-                    value={formTime}
-                    onChangeText={(txt) => handleTimeMask(txt, setFormTime)}
-                  />
+
+                <Text style={styles.inputLabel}>Приоритет</Text>
+                <View style={styles.prioritySelector}>
+                  {[
+                    { id: 'high', label: 'Высокий', color: '#FF758F' },
+                    { id: 'medium', label: 'Средний', color: '#FFB3C1' },
+                    { id: 'low', label: 'Низкий', color: '#A3CECB' }
+                  ].map(item => (
+                    <TouchableOpacity
+                      key={item.id}
+                      style={[
+                        styles.priorityBtn,
+                        { backgroundColor: item.color },
+                        formPriority === item.id && styles.priorityBtnSelected
+                      ]}
+                      onPress={() => setFormPriority(item.id)}
+                    >
+                      <Text style={styles.priorityBtnText}>{item.label}</Text>
+                    </TouchableOpacity>
+                  ))}
                 </View>
-              </View>
-            ) : (
-              /* Поля для СОБЫТИЯ (С ... ПО ...) */
+              </>
+            )}
+
+            {/* НАСТРОЙКИ ДЛЯ СОБЫТИЯ */}
+            {itemType === 'event' && (
               <View>
                 <Text style={styles.sectionSubTitle}>Начало события:</Text>
                 <View style={styles.rowInputs}>
                   <View style={{ flex: 1, marginRight: 6 }}>
                     <TextInput
                       style={styles.modalInput}
-                      placeholder="Дата начала"
+                      placeholder="Дата (ГГГГ-ММ-ДД)"
                       keyboardType="numeric"
                       maxLength={10}
                       value={formStartDate}
@@ -505,7 +620,7 @@ export default function App() {
                   <View style={{ flex: 1, marginLeft: 6 }}>
                     <TextInput
                       style={styles.modalInput}
-                      placeholder="Время начала"
+                      placeholder="Время (ЧЧ:ММ)"
                       keyboardType="numeric"
                       maxLength={5}
                       value={formStartTime}
@@ -514,12 +629,12 @@ export default function App() {
                   </View>
                 </View>
 
-                <Text style={styles.sectionSubTitle}>Окончание события:</Text>
+                <Text style={styles.sectionSubTitle}>Конец события:</Text>
                 <View style={styles.rowInputs}>
                   <View style={{ flex: 1, marginRight: 6 }}>
                     <TextInput
                       style={styles.modalInput}
-                      placeholder="Дата конца"
+                      placeholder="Дата (ГГГГ-ММ-ДД)"
                       keyboardType="numeric"
                       maxLength={10}
                       value={formEndDate}
@@ -529,7 +644,7 @@ export default function App() {
                   <View style={{ flex: 1, marginLeft: 6 }}>
                     <TextInput
                       style={styles.modalInput}
-                      placeholder="Время конца"
+                      placeholder="Время (ЧЧ:ММ)"
                       keyboardType="numeric"
                       maxLength={5}
                       value={formEndTime}
@@ -540,37 +655,62 @@ export default function App() {
               </View>
             )}
 
-            <Text style={styles.inputLabel}>Приоритет</Text>
-            <View style={styles.prioritySelector}>
-              {[
-                { id: 'high', label: 'Высокий', color: '#FF758F' },
-                { id: 'medium', label: 'Средний', color: '#FFB3C1' },
-                { id: 'low', label: 'Низкий', color: '#D8E2DC' }
-              ].map(item => (
-                <TouchableOpacity
-                  key={item.id}
-                  style={[
-                    styles.priorityBtn,
-                    { backgroundColor: item.color },
-                    formPriority === item.id && styles.priorityBtnSelected
-                  ]}
-                  onPress={() => setFormPriority(item.id)}
-                >
-                  <Text style={styles.priorityBtnText}>{item.label}</Text>
-                </TouchableOpacity>
-              ))}
-            </View>
+            {/* НАСТРОЙКИ ДЛЯ ПАРЫ */}
+            {itemType === 'class' && (
+              <View>
+                <Text style={styles.inputLabel}>Дата и время пары</Text>
+                <View style={styles.rowInputs}>
+                  <View style={{ flex: 1, marginRight: 6 }}>
+                    <TextInput
+                      style={styles.modalInput}
+                      placeholder="Дата (ГГГГ-ММ-ДД)"
+                      keyboardType="numeric"
+                      maxLength={10}
+                      value={formClassDate}
+                      onChangeText={(txt) => handleDateMask(txt, setFormClassDate)}
+                    />
+                  </View>
+                  <View style={{ flex: 1, marginLeft: 6 }}>
+                    <TextInput
+                      style={styles.modalInput}
+                      placeholder="Время (ЧЧ:ММ)"
+                      keyboardType="numeric"
+                      maxLength={5}
+                      value={formClassTime}
+                      onChangeText={(txt) => handleTimeMask(txt, setFormClassTime)}
+                    />
+                  </View>
+                </View>
+
+                <Text style={styles.inputLabel}>Тип занятия</Text>
+                <View style={styles.prioritySelector}>
+                  {[
+                    { id: 'lecture', label: 'Лекция', color: '#FDE047' },
+                    { id: 'seminar', label: 'Семинар', color: '#FB923C' },
+                    { id: 'practice', label: 'Практика', color: '#38BDF8' }
+                  ].map(subtype => (
+                    <TouchableOpacity
+                      key={subtype.id}
+                      style={[
+                        styles.priorityBtn,
+                        { backgroundColor: subtype.color },
+                        formClassSubtype === subtype.id && styles.priorityBtnSelected
+                      ]}
+                      onPress={() => setFormClassSubtype(subtype.id)}
+                    >
+                      <Text style={[styles.priorityBtnText, { color: '#332E2E' }]}>{subtype.label}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </View>
+            )}
 
             <View style={styles.modalActions}>
               {editingId && (
-                <TouchableOpacity 
-                  style={styles.deleteBtn} 
-                  onPress={() => handleDelete(editingId)}
-                >
+                <TouchableOpacity style={styles.deleteBtn} onPress={() => handleDelete(editingId)}>
                   <Text style={styles.deleteBtnText}>Удалить</Text>
                 </TouchableOpacity>
               )}
-
               <TouchableOpacity style={styles.saveBtn} onPress={handleSave}>
                 <Text style={styles.saveBtnText}>Сохранить</Text>
               </TouchableOpacity>
@@ -596,26 +736,42 @@ const styles = StyleSheet.create({
   inner: {
     flex: 1,
     paddingHorizontal: 16,
-    paddingTop: 16,
+    paddingTop: 14,
+  },
+  topBar: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 10,
   },
   headerTitle: {
-    fontSize: 24,
+    fontSize: 22,
     fontWeight: '700',
     color: '#4A3E3D',
-    marginBottom: 12,
+  },
+  shareButton: {
+    backgroundColor: '#FFB3C1',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 14,
+  },
+  shareButtonText: {
+    color: '#FFFFFF',
+    fontSize: 12,
+    fontWeight: '700',
   },
   calendarContainer: {
     backgroundColor: '#FFFFFF',
     borderRadius: 18,
     padding: 12,
-    marginBottom: 16,
+    marginBottom: 14,
     elevation: 2,
   },
   monthHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 10,
+    marginBottom: 8,
   },
   monthNavBtn: {
     fontSize: 16,
@@ -623,19 +779,19 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
   },
   monthTitle: {
-    fontSize: 16,
+    fontSize: 15,
     fontWeight: '700',
     color: '#4A3E3D',
   },
   weekHeader: {
     flexDirection: 'row',
     justifyContent: 'space-around',
-    marginBottom: 6,
+    marginBottom: 4,
   },
   weekDayText: {
     width: 32,
     textAlign: 'center',
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: '600',
     color: '#A09090',
   },
@@ -645,50 +801,58 @@ const styles = StyleSheet.create({
   },
   dayCellEmpty: {
     width: '14.28%',
-    height: 36,
+    height: 48,
   },
   dayCell: {
     width: '14.28%',
-    height: 36,
+    height: 48,
     alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: 10,
+    paddingTop: 4,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: 'transparent',
   },
   dayCellSelected: {
-    backgroundColor: '#FF758F',
+    borderColor: '#FF758F',
+    backgroundColor: '#FFF0F3',
   },
   dayText: {
-    fontSize: 13,
+    fontSize: 12,
     color: '#4A3E3D',
-    fontWeight: '500',
+    fontWeight: '600',
+    marginBottom: 2,
   },
   dayTextSelected: {
-    color: '#FFFFFF',
+    color: '#FF758F',
     fontWeight: '700',
   },
-  dot: {
-    width: 4,
-    height: 4,
-    borderRadius: 2,
-    backgroundColor: '#FF758F',
-    marginTop: 2,
+  stripesContainer: {
+    width: '90%',
+    gap: 2,
+    alignItems: 'center',
   },
-  dotSelected: {
-    backgroundColor: '#FFFFFF',
+  stripe: {
+    width: '100%',
+  },
+  moreStripesText: {
+    fontSize: 8,
+    color: '#A09090',
+    fontWeight: 'bold',
+    lineHeight: 8,
   },
   sectionHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 8,
+    marginBottom: 6,
   },
   sectionTitle: {
-    fontSize: 16,
+    fontSize: 15,
     fontWeight: '700',
     color: '#4A3E3D',
   },
   resetFilterText: {
-    fontSize: 12,
+    fontSize: 11,
     color: '#FF758F',
     fontWeight: '600',
   },
@@ -700,14 +864,14 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   emptyText: {
-    fontSize: 15,
+    fontSize: 14,
     fontWeight: '600',
     color: '#8A7A7A',
   },
   emptySubText: {
-    fontSize: 12,
+    fontSize: 11,
     color: '#B0A8B9',
-    marginTop: 4,
+    marginTop: 2,
   },
   taskCard: {
     backgroundColor: '#FFFFFF',
@@ -754,7 +918,7 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   taskTitle: {
-    fontSize: 14,
+    fontSize: 13,
     fontWeight: '600',
     color: '#4A3E3D',
   },
@@ -762,14 +926,12 @@ const styles = StyleSheet.create({
     textDecorationLine: 'line-through',
     color: '#9E9E9E',
   },
-  eventBadge: {
-    backgroundColor: '#E0F2FE',
-    color: '#0284C7',
-    fontSize: 10,
+  badge: {
+    fontSize: 9,
     fontWeight: '700',
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 6,
+    paddingHorizontal: 5,
+    paddingVertical: 1,
+    borderRadius: 4,
   },
   taskFormattedDate: {
     fontSize: 11,
@@ -789,7 +951,7 @@ const styles = StyleSheet.create({
   },
   addButton: {
     backgroundColor: '#FFB3C1',
-    paddingVertical: 14,
+    paddingVertical: 13,
     borderRadius: 20,
     alignItems: 'center',
     marginVertical: 10,
@@ -814,7 +976,7 @@ const styles = StyleSheet.create({
     maxWidth: 400,
   },
   modalTitle: {
-    fontSize: 18,
+    fontSize: 17,
     fontWeight: '700',
     color: '#4A3E3D',
     marginBottom: 12,
@@ -824,12 +986,12 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     backgroundColor: '#FFF0F3',
     borderRadius: 12,
-    padding: 4,
+    padding: 3,
     marginBottom: 12,
   },
   typeBtn: {
     flex: 1,
-    paddingVertical: 8,
+    paddingVertical: 7,
     alignItems: 'center',
     borderRadius: 10,
   },
@@ -837,7 +999,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#FF758F',
   },
   typeBtnText: {
-    fontSize: 13,
+    fontSize: 12,
     fontWeight: '600',
     color: '#8A7A7A',
   },
@@ -862,7 +1024,7 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     paddingHorizontal: 12,
     paddingVertical: 8,
-    fontSize: 13,
+    fontSize: 12,
     color: '#4A3E3D',
     marginBottom: 10,
   },
@@ -873,7 +1035,7 @@ const styles = StyleSheet.create({
   prioritySelector: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    marginBottom: 16,
+    marginBottom: 14,
   },
   priorityBtn: {
     flex: 1,
