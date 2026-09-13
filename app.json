@@ -1,0 +1,24 @@
+{
+  "expo": {
+    "name": "Мой Календарь",
+    "slug": "pink-calendar",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "splash": {
+      "resizeMode": "contain",
+      "backgroundColor": "#FFF5F7"
+    },
+    "ios": {
+      "supportsTablet": true
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#FFF5F7"
+      },
+      "package": "com.pinkcalendar.app"
+    }
+  }
+}
+
