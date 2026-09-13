@@ -22,8 +22,8 @@
         "backgroundColor": "#FFF5F7"
       },
       "package": "com.pinkcalendar.app"
-    }
-    "web":{
+    },
+    "web": {
       "favicon": "./icon.jpg"
     }
   }
