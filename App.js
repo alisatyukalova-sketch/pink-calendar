@@ -543,7 +543,7 @@ export default function App() {
             <Text style={styles.inputLabel}>Название</Text>
             <TextInput
               style={styles.modalInput}
-              placeholder="Например: Высшая математика"
+              placeholder="Бла-Бла-Бла"
               placeholderTextColor="#B0A8B9"
               value={formTitle}
               onChangeText={setFormTitle}
