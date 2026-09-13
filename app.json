@@ -6,6 +6,9 @@
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
+    "experiments": {
+      "baseUrl": "/pink-calendar"
+    },
     "splash": {
       "resizeMode": "contain",
       "backgroundColor": "#FFF5F7"
@@ -21,4 +24,3 @@
     }
   }
 }
-
